@@ -1,0 +1,279 @@
+---
+title: "Practical Machine Learning"
+author: "Pin"
+date: "2024-11-16"
+output:
+  html_document:
+    keep_md: true
+  pdf_document: default
+
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+## R Markdown
+
+This report aims to evaluate the performance of four different machine learning models—Decision Tree, Random Forests, Support Vector Machine (SVM), and Generalized Boosting—on predicting the class of a weight lifting exercise dataset. The dataset contains multiple features derived from accelerometers placed on different body parts of six participants performing barbell lifts. Each model is assessed based on its accuracy and out-of-sample error, using a training dataset and a separate validation set. The goal is to determine which model provides the best predictive performance for classifying exercise types based on the sensor data.
+
+## Load all necessary packages
+
+```{r package, echo = TRUE}
+library(caret)
+library(lattice)
+library(ggplot2)
+library(kernlab)
+library(randomForest)
+library(corrplot)
+library(rpart.plot)
+```
+
+## Data Loading and Preprocessing
+
+```{r data, echo = TRUE}
+train_raw <- read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv")
+test_raw <- read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv")
+dim(train_raw)
+dim(test_raw)
+```
+
+## Handle the Missing Values
+
+```{r missing, echo = TRUE}
+
+# Check the observations that have no missing values 
+sum(complete.cases(train_raw))
+```
+
+# Replace the missing values in training and testing datasets
+
+```{r missing_replace, echo = TRUE}
+
+# Replace the missing values and remove na
+train_raw <- train_raw[, colMeans(is.na(train_raw)) < .9]
+test_data <- test_raw[, colMeans(is.na(test_raw)) < .9]
+
+# Check the data structure 
+str(train_raw)
+
+# Remove column with data
+train_raw <- train_raw[, -c(1:7)]
+```
+
+# Remove if the variances is too close to 0
+
+```{r remove_variance, echo = TRUE}
+nearzvar <- nearZeroVar(train_raw)
+train_raw <- train_raw[, -nearzvar]
+
+# confirm 
+dim(train_raw)
+```
+
+### Split the Training Dataset
+
+```{r split_train, echo = TRUE}
+
+# set seed for reproducibility 
+set.seed(123)
+
+# partitioning the dataset into training and validation 
+data <- createDataPartition(y=train_raw$classe, p=0.7, list=FALSE)
+train_data <- train_raw[data,]
+valid_data <- train_raw[-data,]
+```
+
+For cross validation, 70% of the dataset will split into training data (because of p = 0.7) and validation will be 30% of the datasets.
+
+# Plot
+```{r plot_obs, echo = TRUE}
+# plot 
+corr_matrix <- cor(train_data[, -length(names(train_data))])
+corrplot(corr_matrix, method = "color", tl.cex = 0.5)
+```
+
+# Convert "classe" into factor variable
+
+```{r classe_factor, echo = TRUE}
+train_data$classe <- as.factor(train_data$classe)
+valid_data$classe <- as.factor(valid_data$classe)
+```
+
+# Set up control to use 5 fold cross validation for prediction model
+
+```{r fivefold, echo = TRUE}
+valid_control <- trainControl(method="cv", number = 5, verboseIter = FALSE)
+```
+
+## Prediction Model
+
+Application on 4 prediction models: (1) Decision Trees (2) Random Forests (3) Support Vector Machines (4) Generalized Boosting
+
+## Decision Trees
+
+```{r decision_tree, echo = TRUE}
+
+# Create a decision tree model by using the rpart method 
+
+decision_tree <- train(classe ~ ., data = train_data, method = "rpart",
+                       trControl = valid_control)
+
+# Apply the model to the validation set 
+
+tree_predict <- predict(decision_tree, valid_data)
+tree_confm <- confusionMatrix(tree_predict, valid_data$classe)
+tree_confm
+
+
+tree_accuracy <- tree_confm$overall[1]
+tree_samper <- 1 - tree_accuracy
+tree_samper
+
+```
+
+The decision tree prediction model show 0.4997 accuracy and the out of sample error rate of 0.5002549.
+
+```{r plot_descision, echo = TRUE}
+plot(decision_tree)
+```
+
+```{r decision_rpart_plot, echo = TRUE}
+rpart.plot(decision_tree$finalModel, main = "Decision Tree Visualization")
+```
+
+```{r visual_decision, echo = TRUE}
+
+# Create rpart decision tree model 
+model_tree <- rpart(classe ~., data = train_data, method = "class")
+
+# plot decision tree using rpart 
+prp(model_tree)
+```
+
+## Random Forest
+
+```{r random_model, echo = TRUE}
+
+# Create random forest model with 5 fold cross validation using rf method 
+
+rf_model <- train(classe ~ ., data = train_data, method = "rf",
+                  trControl = valid_control)
+
+# Apply the model to the validation set 
+rf_pred <- predict(rf_model, valid_data)
+rf_confm <- confusionMatrix(rf_pred, valid_data$classe)
+rf_confm
+
+# Random forest accuracy and out sample error 
+
+rf_accuracy <- rf_confm$overall[1]
+rf_accuracy 
+
+rf_outsample <- 1 - rf_accuracy
+rf_outsample
+```
+
+The accuracy rate obtained from the Random Forest is 0.9928632 and the out of sample error rate is 0.007136788.
+
+```{r forest_plot, echo = TRUE}
+plot(rf_model)
+```
+
+## Support Vector Machine
+
+```{r support_vector, echo = TRUE}
+
+# Create support vector machine prediction model with 5 fold cross validation using svmLinear method 
+
+support_model <- train(classe ~ ., data = train_data, method = "svmLinear",
+                  trControl = valid_control)
+
+# Apply the model to validation set 
+support_pred <- predict(support_model, valid_data)
+support_confm <- confusionMatrix(support_pred, valid_data$classe)
+support_confm
+
+# Accuracy and out of sample error
+support_accuracy <- support_confm$overall[1]
+support_accuracy
+
+support_outsample <- 1 - support_accuracy
+support_outsample
+```
+
+The accuracy rate obtained from the Support Vector Machine model is 0.7860663 and the out of sample error rate is 0.2139337.
+
+## Generalized Boosting
+
+```{r gnb, echo = TRUE}
+
+# Separate control to use repeated 5 fold cross validation 
+gnb <- trainControl(method = "repeatedcv", number = 5, verboseIter = FALSE)
+
+# Generalized boosting prediction model with 5 fold repeated 
+gnb_model <- train(classe ~ ., data = train_data, method = "gbm",
+                   trControl = gnb,
+                   verbose = FALSE)
+
+# Apply model to the validation set 
+gnb_pred <- predict(gnb_model, valid_data)
+gnb_confm <- confusionMatrix(gnb_pred, valid_data$classe)
+gnb_confm
+
+# Accuracy and out of sample error
+gnb_accuracy <- gnb_confm$overall[1]
+gnb_accuracy
+
+gnb_outsample <- 1 - gnb_accuracy
+gnb_outsample
+```
+
+The accuracy rate obtained from Generalized Boost model is 0.9632965 and the out of sample error rate is 0.03670348.
+
+```{r gnb_plot, echo = TRUE}
+plot(gnb_model)
+```
+
+## Summary of prediction model based on their accuracy and out of sample error rate
+
+# Summary table of the 4 methods
+
+```{r summary, echo = TRUE}
+model = c("Decision Tree", "Random Forests", "Support Vector", "Generalized Boosting")
+Accuracy <- round(c(tree_accuracy, rf_accuracy, support_accuracy, gnb_accuracy), 4)
+Out_of_Sample_Error <- 1 - Accuracy
+data.frame(Accuarcy = Accuracy, Out_of_Sample_Error = Out_of_Sample_Error, row.names = model)
+```
+
+The results indicate that Random Forests achieved the highest accuracy (99%) and lowest out-of-sample error (1%), followed by Generalized Boosting (96.33% accuracy, 3.67% error), while Decision Tree and Support Vector Machine exhibited significantly lower performance.
+
+Therefore, Random Forest model is selected as the optimal prediction model.
+
+## Apply Random Forest to the Dataset
+
+```{r applyrm, echo = TRUE}
+predict_result <- predict(rf_model, test_data)
+predict_result
+```
+
+# Generate files
+  
+```{r warning=FALSE, error=FALSE}
+pml_write_files = function(x){
+   n = length(x)
+   for(i in 1:n){
+    filename = paste0("D:/R/course",i,".txt")
+    write.table(x[i], file = filename, quote = FALSE, row.names = FALSE, col.names = FALSE)
+    }
+}
+```  
+Generating the Files.  
+```{r warning=FALSE, error=FALSE}
+pml_write_files(predict_result)
+rm(rf_model)
+rm(train_data)
+rm(test_data)
+rm(valid_data)
+rm(pml_write_files)
+```  
